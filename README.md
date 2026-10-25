@@ -10,6 +10,8 @@ Required existing repository secret: `GMAIL_APP_PASSWORD`. SMTP login and alert 
 
 ## Duplicate suppression
 
-`.monitor/state.json` persists validated setup and alerted variant IDs in the repository. Runs are serialized. Each variant is alerted at most once, even if it later restocks. To prioritise avoiding duplicates, the alert reservation is committed before SMTP. A crash or ambiguous SMTP failure after reservation can therefore lose an alert rather than repeat it; inspect failed run logs before changing state. Do not delete state casually.
+`.monitor/state.json` persists validated setup and the last complete successful availability snapshot. Runs are serialized. A variant alerts on first availability and on each observed unavailable → available transition. Continuous availability is silent. Failed or incomplete checks preserve the previous snapshot. Legacy permanent claims seed the first snapshot, then no longer prevent restock alerts.
+
+The snapshot is committed before SMTP to prevent duplicate alerts after interrupted runs. An ambiguous SMTP failure can lose that alert; inspect failed runs before changing state. A sell-out and restock entirely between checks cannot be detected.
 
 The setup email is also reserved before SMTP; an interrupted setup deliberately requires inspection before resetting `test_claimed`. SMTP acceptance is not proof of inbox placement.

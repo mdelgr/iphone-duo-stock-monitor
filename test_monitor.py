@@ -51,11 +51,52 @@ class Tests(unittest.TestCase):
         state = {'validated': True, 'claimed': []}
         State.return_value.load.return_value = state
         events = []
-        State.return_value.save.side_effect = lambda s: events.append(('saved', list(s['claimed'])))
+        State.return_value.save.side_effect = lambda s: events.append(('saved', list(s['last_available'])))
         mail.side_effect = lambda *a: events.append(('mail', None))
         monitor.main()
         self.assertEqual(events, [('saved', ['p']), ('mail', None)])
         monitor.main()
         self.assertEqual(mail.call_count, 1)
+
+    @patch('monitor.mail')
+    @patch('monitor.State')
+    @patch('monitor.live')
+    def test_restock_cycles_and_failures(self, live, State, mail):
+        state = {'validated': True, 'claimed': ['p']}
+        State.return_value.load.side_effect = lambda: copy.deepcopy(state)
+        State.return_value.save.side_effect = lambda s: state.update(copy.deepcopy(s))
+        # Migrate legacy state without repeating an existing alert.
+        live.return_value = {'p': 'variant'}
+        monitor.main()
+        mail.assert_not_called()
+        # Observed sell-out rearms the variant.
+        live.return_value = {}
+        monitor.main()
+        self.assertEqual(state['last_available'], [])
+        live.return_value = {'p': 'variant'}
+        monitor.main()
+        monitor.main()
+        self.assertEqual(mail.call_count, 1)
+        saved = copy.deepcopy(state)
+        live.side_effect = ValueError('incomplete inventory')
+        with self.assertRaises(ValueError): monitor.main()
+        self.assertEqual(state, saved)
+        live.side_effect = None
+        monitor.main()
+        self.assertEqual(mail.call_count, 1)
+        live.return_value = {}
+        monitor.main()
+        live.return_value = {'p': 'variant'}
+        monitor.main()
+        self.assertEqual(mail.call_count, 2)
+
+    @patch('monitor.mail')
+    @patch('monitor.State')
+    @patch('monitor.live', return_value={'p': 'variant'})
+    def test_state_write_failure_never_sends(self, live, State, mail):
+        State.return_value.load.return_value = {'validated': True, 'claimed': [], 'last_available': []}
+        State.return_value.save.side_effect = RuntimeError('write failed')
+        with self.assertRaises(RuntimeError): monitor.main()
+        mail.assert_not_called()
 
 if __name__ == '__main__': unittest.main()

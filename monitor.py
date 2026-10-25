@@ -74,8 +74,9 @@ def live():
 
 
 def new_stock(available, state):
-    # Each variant is alerted at most once, including across restocks and reruns.
-    return {p: n for p, n in available.items() if p not in state.get('claimed', [])}
+    # Legacy claims seed the first snapshot without repeating an existing alert.
+    previous = state.get('last_available', state.get('claimed', []))
+    return {p: n for p, n in available.items() if p not in previous}
 
 
 class State:
@@ -96,6 +97,8 @@ class State:
         state = json.loads(base64.b64decode(result['content']))
         if not isinstance(state.get('claimed'), list) or not isinstance(state.get('validated'), bool):
             raise ValueError('Invalid persistent state; refusing to reset deduplication')
+        if 'last_available' in state and (not isinstance(state['last_available'], list) or not all(isinstance(p, str) for p in state['last_available'])):
+            raise ValueError('Invalid availability snapshot')
         return state
 
     def save(self, state):
@@ -134,10 +137,13 @@ def main():
         state['validated_at'] = datetime.now(timezone.utc).isoformat()
         storage.save(state)
     fresh = new_stock(available, state)
-    if fresh:
-        # Commit reservation BEFORE sending. Favour no duplicates over retrying an uncertain SMTP delivery.
-        state['claimed'] = sorted(set(state['claimed']) | set(fresh))
+    current = sorted(available)
+    if state.get('last_available') != current:
+        # Persist a complete successful snapshot BEFORE SMTP. Failed live checks never reach here.
+        # An observed sell-out rearms that variant; continuous availability does not repeat.
+        state['last_available'] = current
         storage.save(state)
+    if fresh:
         mail('iPhone Duo available for pickup at Apple Highpoint',
              '\n'.join(fresh.values()) + '\n\n' + CATALOG + '\n\nAvailability may change before checkout.')
         print(f'SMTP accepted stock alert for {len(fresh)} new variants')
