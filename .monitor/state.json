@@ -1,5 +1,6 @@
 {
   "claimed": [],
-  "validated": false,
-  "test_claimed": true
+  "validated": true,
+  "test_claimed": true,
+  "validated_at": "2026-10-25T23:38:49.053679+00:00"
 }
